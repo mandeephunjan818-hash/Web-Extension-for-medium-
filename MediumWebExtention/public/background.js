@@ -1,79 +1,4 @@
-import MediumDB from './db.js';
-
 const mediumRegex = /^https?:\/\/([a-z0-9-]+\.)*medium\.com\/.*/i;
-
-let db;
-
-// Initialize database on service worker startup
-async function initDB() {
-    try {
-        db = new MediumDB();
-        await db.open();
-
-        const stats = await db.getStats();
-        console.log('📊 Database stats:', stats);
-
-        return db;
-    } catch (error) {
-        console.error('❌ Failed to initialize DB:', error);
-        return null;
-    }
-}
-
-// Initialize immediately when service worker starts
-initDB().then(database => {
-    console.log('🚀 Service worker initialized with database');
-    db = database;
-});
-
-// ✅ ADD MESSAGE LISTENER FOR POPUP/CONTENT SCRIPT COMMUNICATION
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'getDatabaseData') {
-        handleGetDatabaseData(sendResponse);
-        return true; // Keep channel open for async response
-    }
-});
-
-// ✅ HANDLE DATABASE DATA REQUESTS
-async function handleGetDatabaseData(sendResponse) {
-    try {
-        // Ensure DB is initialized
-        if (!db) {
-            db = await initDB();
-        }
-
-        const [authors, stats, articles, events] = await Promise.all([
-            db.getAllAuthors(),
-            db.getStats(),
-            db.getAllArticles(),
-            db.getAllEvents()
-        ]);
-
-        sendResponse({
-            authors,
-            stats,
-            articles,
-            events
-        });
-    } catch (error) {
-        console.error('Error fetching database data:', error);
-        sendResponse({
-            authors: [],
-            stats: null,
-            articles: [],
-            events: [],
-            error: error.message
-        });
-    }
-}
-
-// Listen for extension installation/update
-chrome.runtime.onInstalled.addListener(async () => {
-    console.log('🔧 Extension installed/updated');
-    if (!db) {
-        db = await initDB();
-    }
-});
 
 // When user switches tabs
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
@@ -137,7 +62,7 @@ async function checkUrlAndPermission(url, tabId) {
                 isMedium
             }
         })
-        if (hasPerm && isMedium) getFollower(tabId, url);
+        if (hasPerm && isMedium) getFollower(tabId);
     })
 }
 
@@ -261,17 +186,11 @@ function extractArticleData() {
     }
 }
 
-async function getFollower(tabId, tabUrl) {
+async function getFollower(tabId) {
     if (!tabId) {
         console.log("no TabId");
         return;
     }
-
-    const result = await db.CheckAuthorPresenc(tabUrl.split("/")[2]);
-    const result2 = await db.CheckArticlePresenc(tabUrl);
-
-    console.log("Author check result:", result);
-    console.log("Article check result:", result2);
 
     const data = await chrome.scripting.executeScript({ target: { tabId }, func: extractArticleData });
 
@@ -279,33 +198,7 @@ async function getFollower(tabId, tabUrl) {
 
     if (data[0].result.items.length === 0) return;
 
-    if (result.result === true) await db.saveAuther(data[0].result.items[0].Auther);
-
-    if (result2.result === true) {
-        data[0].result.items[0].Artical.visitCount = result2.data;
-
-        console.log(data[0]);
-
-        chrome.storage.local.set({
-            ArticalData: data[0].result
-        })
-
-        await db.saveArticle(data[0].result.items[0].Artical);
-    } else {
-        const ArticalData = await db.updateArticleVisitCount(tabUrl, result2.data);
-
-        const refreshedData = {
-            ...data[0].result,
-            items: [{
-                ...data[0].result.items[0],
-                Artical: ArticalData.data
-            }]
-        };
-
-        chrome.storage.local.set({
-            ArticalData: refreshedData
-        });
-    }
-
-    await db.saveEvent(data[0].result.items[0]);
+    chrome.storage.local.set({
+        ArticalData: data[0].result
+    })
 }
