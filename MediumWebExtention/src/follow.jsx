@@ -1,4 +1,4 @@
-import { AspectRatio, Box, Card, CardContent, CardOverflow, Stack } from "@mui/joy";
+import { Box, Card, CardContent, CardOverflow, Stack } from "@mui/joy";
 import Typography from "@mui/material/Typography";
 import React from "react";
 import { useTheme } from "./theme/ThemeContext";
@@ -54,25 +54,23 @@ export default function Follow() {
                                     variant={themeManager.isSolid ? 'solid' : 'soft'}
                                     color={themeManager.color}
                                     invertedColors
-                                    sx={{ ...themeManager.getTextColor() }}
+                                    sx={{ ...themeManager.getTextColor() , overflow: 'hidden' }}
                                     key={index}
                                 >
-                                    <CardOverflow>
-                                        <AspectRatio ratio="1" sx={{ width: 90 }}>
-                                            <img
-                                                src={value.Auther?.AutherImage}
-                                                alt={`Profile picture of ${value.Auther?.AutherName}`}
-                                                loading="lazy"
-                                                decoding="async"
-                                                style={{ objectFit: 'cover' }}
-                                                onError={(e) => {
-                                                    e.target.onerror = null;
-                                                    e.target.src = 'https://cdn.pixabay.com/photo/2024/07/27/14/45/writer-8925722_1280.png';
-                                                }}
-                                            />
-                                        </AspectRatio>
+                                    <CardOverflow sx={{ padding: 0 }} >
+                                        <img
+                                            src={value.Auther?.AutherImage}
+                                            alt={`Profile picture of ${value.Auther?.AutherName}`}
+                                            loading="lazy"
+                                            decoding="async"
+                                            style={{ objectFit: 'cover', height: "100%", width: 90 }}
+                                            onError={(e) => {
+                                                e.target.onerror = null;
+                                                e.target.src = 'https://cdn.pixabay.com/photo/2024/07/27/14/45/writer-8925722_1280.png';
+                                            }}
+                                        />
                                     </CardOverflow>
-                                    <CardContent sx={{ flexGrow: 1 }}>
+                                    <CardContent sx={{ flexGrow: 1, minWidth: 0 }}>
                                         <Typography sx={{ fontWeight: 'md', fontSize: "sm", color: "success.plainColor" }}>
                                             {value.Auther?.AutherName || 'Unknown Author'}
                                         </Typography>

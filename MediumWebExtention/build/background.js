@@ -5,24 +5,22 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
     const tab = await chrome.tabs.get(tabId);
     setTimeout(() => {
         checkUrlAndPermission(tab.url, tabId);
-    }, 3000);
+    }, 3000); // Initial delay for tab switch
 });
 
-// When URL changes in the current tab (page load / navigation)
+// When URL changes in the current tab
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    // changeInfo.url fires when URL changes
     if (changeInfo.url) {
         setTimeout(() => {
             checkUrlAndPermission(changeInfo.url, tabId);
-        }, 3000);
+        }, 3000); // Initial delay for navigation
         return;
     }
 
-    // also handle first time load completion (optional)
     if (changeInfo.status === "complete" && tabId) {
         setTimeout(() => {
             checkUrlAndPermission(tab.url, tabId);
-        }, 3000);
+        }, 3000); // Initial delay for page load
         return;
     }
 });
@@ -31,7 +29,6 @@ async function checkUrlAndPermission(url, tabId) {
     if (!url || !url.startsWith("http")) return;
 
     const isMedium = mediumRegex.test(url);
-
     const originPattern = `${new URL(url).origin}/*`;
 
     if (!isMedium) {
@@ -43,17 +40,17 @@ async function checkUrlAndPermission(url, tabId) {
                 hasPerm: false,
                 isMedium
             }
-        })
+        });
         console.log("Not Medium:", url);
         return;
     }
 
-    chrome.permissions.contains({ origins: [originPattern] }, (hasPerm) => {
+    chrome.permissions.contains({ origins: [originPattern] }, async (hasPerm) => {
         console.log("URL:", url);
         console.log("Origin pattern:", originPattern);
         console.log("Has host permission:", hasPerm);
 
-        chrome.storage.local.set({
+        await chrome.storage.local.set({
             laststatus: {
                 type: "URL_PERMISSION_STATUS",
                 url,
@@ -61,13 +58,102 @@ async function checkUrlAndPermission(url, tabId) {
                 hasPerm,
                 isMedium
             }
-        })
-        if (hasPerm && isMedium) getFollower(tabId);
-    })
+        });
+
+        if (hasPerm && isMedium) {
+            // Wait for content to be ready before extraction
+            const isContentReady = await waitForContentToLoad(tabId);
+            if (isContentReady) {
+                await getFollower(tabId);
+            } else {
+                console.log("Content not ready, skipping extraction");
+            }
+        }
+    });
+}
+
+/**
+ * Waits for page content to be fully loaded and visible
+ * @param {number} tabId - The tab ID to check
+ * @param {number} timeout - Maximum time to wait (default 15 seconds)
+ * @returns {Promise<boolean>} - True if content is ready, false if timeout
+ */
+async function waitForContentToLoad(tabId, timeout = 15000) {
+    const startTime = Date.now();
+    const pollInterval = 500; // Check every 500ms
+
+    console.log(`Waiting for content to load on tab ${tabId}...`);
+
+    while (Date.now() - startTime < timeout) {
+        try {
+            const results = await chrome.scripting.executeScript({
+                target: { tabId },
+                func: () => {
+                    // 1. Check document ready state
+                    if (document.readyState !== 'complete') {
+                        return { ready: false, reason: 'document not complete' };
+                    }
+
+                    // 2. Check for common loading indicators (customize these for Medium)
+                    const loadingSelectors = [
+                        'svg[class*="spinner"]',
+                        'div[class*="loader"]',
+                        'div[class*="loading"]',
+                        'div[class*="skelton"]', // Common for placeholder content
+                        '[data-testid="loading"]',
+                        '.spinner',
+                        '.loader',
+                        '.loading'
+                    ];
+
+                    for (const selector of loadingSelectors) {
+                        const loadingElement = document.querySelector(selector);
+                        if (loadingElement && loadingElement.offsetParent !== null) {
+                            return { ready: false, reason: 'loading indicator visible' };
+                        }
+                    }
+
+                    // 3. Check if our target content is present AND visible
+                    const readTimeElements = document.querySelectorAll('span[data-testid="storyReadTime"]');
+                    if (readTimeElements.length > 0 && readTimeElements[0].offsetParent !== null) {
+                        return { ready: true, reason: 'content found and visible' };
+                    }
+
+                    // 4. Check if article container exists but is empty
+                    const articleContainer = document.querySelector('article');
+                    if (articleContainer && articleContainer.textContent.trim().length < 100) {
+                        return { ready: false, reason: 'article container empty' };
+                    }
+
+                    return { ready: false, reason: 'target content not yet present' };
+                }
+            });
+
+            const status = results[0].result;
+            if (status.ready) {
+                console.log("✅ Content is ready:", status.reason);
+                return true;
+            }
+
+            // Log progress every few attempts
+            if ((Date.now() - startTime) % 3000 < 500) {
+                console.log(`⏳ Still waiting: ${status.reason}...`);
+            }
+
+        } catch (error) {
+            console.error("❌ Error checking page readiness:", error);
+            return false;
+        }
+
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+
+    console.log(`❌ Timeout after ${timeout}ms waiting for content to load`);
+    return false;
 }
 
 function extractArticleData() {
-
     const follow = async (element) => {
         try {
             element.click();
@@ -78,11 +164,10 @@ function extractArticleData() {
             console.error("Error clicking follow button:", err);
             return false;
         }
-    }
+    };
 
     const hasdata = (element) => {
         var currentElement = element;
-
         const artical = {
             Auther: {},
             Artical: {}
@@ -92,17 +177,14 @@ function extractArticleData() {
         let foundAuthorImage = null;
         let foundFollowingBtn = null;
         let foundPublishDate = null;
-
         var isFollowing = null;
         var checks = 0;
 
         while (currentElement && currentElement.tagName !== "ARTICLE" && checks !== 4) {
-
             console.log("checking element:", foundAuthorImage, foundAuthorName, foundFollowingBtn, foundPublishDate);
 
             if (foundAuthorName === null) {
                 const authorName = currentElement.querySelectorAll('a[data-testid="authorName"]') || null;
-
                 if (authorName && authorName.length > 0) {
                     artical.Auther.AutherName = authorName[0].textContent.trim();
                     artical.Auther.AutherUrl = authorName[0].href;
@@ -113,7 +195,6 @@ function extractArticleData() {
 
             if (foundAuthorImage === null) {
                 const autherImage = currentElement.querySelectorAll(`img[data-testid="authorPhoto"]`) || null;
-
                 if (autherImage && autherImage.length > 0) {
                     artical.Auther.AutherImage = autherImage[0].src;
                     foundAuthorImage = true;
@@ -122,8 +203,7 @@ function extractArticleData() {
             }
 
             if (foundFollowingBtn === null) {
-                isFollowing = currentElement.querySelectorAll('button span span') || null;
-
+                isFollowing = currentElement.querySelectorAll('button') || null;
                 if (isFollowing && isFollowing.length > 0) {
                     foundFollowingBtn = true;
                     ++checks;
@@ -132,21 +212,37 @@ function extractArticleData() {
 
             if (foundPublishDate === null) {
                 const publishDate = currentElement.querySelectorAll('span[data-testid="storyPublishDate"]') || null;
-
                 if (publishDate && publishDate.length > 0) {
                     artical.Artical.ArticalDate = publishDate[0].textContent.trim();
                     foundPublishDate = true;
                     ++checks;
+                } else {
+                    const textElements = currentElement.querySelectorAll('span, div, p, time, a');
+                    const agoPattern = /\d+\s+(minute|hour|day|week|month|year)s?\s+ago/i;
+
+                    for (const el of textElements) {
+                        const text = el.textContent.trim();
+
+                        if (agoPattern.test(text) && el.offsetParent !== null && text.length < 100) {
+                            artical.Artical.ArticalDate = text;
+                            foundPublishDate = true;
+                            ++checks;
+                            break;
+                        }
+                    }
                 }
             }
 
             if (checks === 4) {
                 if (isFollowing && isFollowing.length > 0 && isFollowing[0].textContent.trim() === "Follow") {
                     const result = follow(isFollowing[0]);
-                    if (result === true) {
+                    const ChangeButton = currentElement.querySelectorAll('button') || null;
+                    if (result === true && ChangeButton[0].textContent.trim() === "Following") {
                         artical.Auther.isFollowing = true;
+                    } else {
+                        artical.Auther.isFollowing = false;
                     }
-                } else if (isFollowing && isFollowing.length > 0) {
+                } else if (isFollowing && isFollowing.length > 0 && isFollowing[0].textContent.trim() === "Following") {
                     artical.Auther.isFollowing = true;
                 }
                 return { artical, result: true };
@@ -160,7 +256,7 @@ function extractArticleData() {
         }
 
         return { artical, result: false };
-    }
+    };
 
     const data = document.querySelectorAll('span[data-testid="storyReadTime"]');
     var articals = [];
@@ -169,7 +265,6 @@ function extractArticleData() {
 
     data.forEach((element) => {
         const result = hasdata(element);
-
         if (result.result === true) {
             result.artical.Artical.ArticalUrl = window.location.href;
             result.artical.Artical.ArticalReadTime = element.textContent.trim();
@@ -183,7 +278,7 @@ function extractArticleData() {
         title: document.title,
         count: data.length,
         items: articals
-    }
+    };
 }
 
 async function getFollower(tabId) {
@@ -192,13 +287,25 @@ async function getFollower(tabId) {
         return;
     }
 
-    const data = await chrome.scripting.executeScript({ target: { tabId }, func: extractArticleData });
+    try {
+        const data = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: extractArticleData
+        });
 
-    console.log("Extracted data:", data[0]);
+        console.log("Extracted data:", data[0].result);
 
-    if (data[0].result.items.length === 0) return;
+        if (data[0].result.items.length === 0) {
+            console.log("No articles found in extraction");
+            return;
+        }
 
-    chrome.storage.local.set({
-        ArticalData: data[0].result
-    })
+        await chrome.storage.local.set({
+            ArticalData: data[0].result
+        });
+
+        console.log("Successfully saved article data to storage");
+    } catch (error) {
+        console.error("Error executing script:", error);
+    }
 }

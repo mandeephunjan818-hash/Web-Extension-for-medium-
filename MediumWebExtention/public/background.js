@@ -105,7 +105,7 @@ async function waitForContentToLoad(tabId, timeout = 15000) {
                         '.loader',
                         '.loading'
                     ];
-                    
+
                     for (const selector of loadingSelectors) {
                         const loadingElement = document.querySelector(selector);
                         if (loadingElement && loadingElement.offsetParent !== null) {
@@ -203,7 +203,7 @@ function extractArticleData() {
             }
 
             if (foundFollowingBtn === null) {
-                isFollowing = currentElement.querySelectorAll('button span span') || null;
+                isFollowing = currentElement.querySelectorAll('button') || null;
                 if (isFollowing && isFollowing.length > 0) {
                     foundFollowingBtn = true;
                     ++checks;
@@ -216,16 +216,33 @@ function extractArticleData() {
                     artical.Artical.ArticalDate = publishDate[0].textContent.trim();
                     foundPublishDate = true;
                     ++checks;
+                } else {
+                    const textElements = currentElement.querySelectorAll('span, div, p, time, a');
+                    const agoPattern = /\d+\s+(minute|hour|day|week|month|year)s?\s+ago/i;
+
+                    for (const el of textElements) {
+                        const text = el.textContent.trim();
+
+                        if (agoPattern.test(text) && el.offsetParent !== null && text.length < 100) {
+                            artical.Artical.ArticalDate = text;
+                            foundPublishDate = true;
+                            ++checks;
+                            break;
+                        }
+                    }
                 }
             }
 
             if (checks === 4) {
                 if (isFollowing && isFollowing.length > 0 && isFollowing[0].textContent.trim() === "Follow") {
                     const result = follow(isFollowing[0]);
-                    if (result === true) {
+                    const ChangeButton = currentElement.querySelectorAll('button') || null;
+                    if (result === true && ChangeButton[0].textContent.trim() === "Following") {
                         artical.Auther.isFollowing = true;
+                    } else {
+                        artical.Auther.isFollowing = false;
                     }
-                } else if (isFollowing && isFollowing.length > 0) {
+                } else if (isFollowing && isFollowing.length > 0 && isFollowing[0].textContent.trim() === "Following") {
                     artical.Auther.isFollowing = true;
                 }
                 return { artical, result: true };
@@ -271,9 +288,9 @@ async function getFollower(tabId) {
     }
 
     try {
-        const data = await chrome.scripting.executeScript({ 
-            target: { tabId }, 
-            func: extractArticleData 
+        const data = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: extractArticleData
         });
 
         console.log("Extracted data:", data[0].result);
@@ -286,7 +303,7 @@ async function getFollower(tabId) {
         await chrome.storage.local.set({
             ArticalData: data[0].result
         });
-        
+
         console.log("Successfully saved article data to storage");
     } catch (error) {
         console.error("Error executing script:", error);
