@@ -1,38 +1,70 @@
+
 const mediumRegex = /^https?:\/\/([a-z0-9-]+\.)*medium\.com\/.*/i;
 
-// When user switches tabs
+const processingTabs = new Set();
+const pendingTimeouts = new Map();
+
+function debounceAndLock(tabId, delay, asyncFn) {
+
+    const existingTimeout = pendingTimeouts.get(tabId);
+    if (existingTimeout) {
+        clearTimeout(existingTimeout);
+        pendingTimeouts.delete(tabId);
+        console.log(`🔄 Debounced previous timer for tab ${tabId}`);
+    }
+
+
+    const timeoutId = setTimeout(async () => {
+        pendingTimeouts.delete(tabId);
+
+
+        if (processingTabs.has(tabId)) {
+            console.log(`⏭️ Tab ${tabId} is already processing, skipping duplicate`);
+            return;
+        }
+
+
+        processingTabs.add(tabId);
+        console.log(`🔒 Acquired lock for tab ${tabId}`);
+
+        try {
+            await asyncFn();
+        } catch (error) {
+            console.error(`❌ Error processing tab ${tabId}:`, error);
+        } finally {
+
+            processingTabs.delete(tabId);
+            console.log(`🔓 Released lock for tab ${tabId}`);
+        }
+    }, delay);
+
+    pendingTimeouts.set(tabId, timeoutId);
+}
+
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-    const tab = await chrome.tabs.get(tabId);
-    setTimeout(() => {
+    debounceAndLock(tabId, 3000, async () => {
+        const tab = await chrome.tabs.get(tabId);
         checkUrlAndPermission(tab.url, tabId);
-    }, 3000); // Initial delay for tab switch
+    });
 });
 
-// When URL changes in the current tab
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.url) {
-        setTimeout(() => {
-            checkUrlAndPermission(changeInfo.url, tabId);
-        }, 3000); // Initial delay for navigation
-        return;
-    }
-
-    if (changeInfo.status === "complete" && tabId) {
-        setTimeout(() => {
-            checkUrlAndPermission(tab.url, tabId);
-        }, 3000); // Initial delay for page load
-        return;
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.url || (changeInfo.status === "complete")) {
+        debounceAndLock(tabId, 3000, async () => {
+            const freshTab = await chrome.tabs.get(tabId);
+            checkUrlAndPermission(freshTab.url, tabId);
+        });
     }
 });
 
-async function checkUrlAndPermission(url, tabId) {
+function checkUrlAndPermission(url, tabId) {
     if (!url || !url.startsWith("http")) return;
 
     const isMedium = mediumRegex.test(url);
     const originPattern = `${new URL(url).origin}/*`;
 
     if (!isMedium) {
-        await chrome.storage.local.set({
+        chrome.storage.local.set({
             laststatus: {
                 type: "URL_PERMISSION_STATUS",
                 url,
@@ -45,12 +77,9 @@ async function checkUrlAndPermission(url, tabId) {
         return;
     }
 
-    chrome.permissions.contains({ origins: [originPattern] }, async (hasPerm) => {
-        console.log("URL:", url);
-        console.log("Origin pattern:", originPattern);
-        console.log("Has host permission:", hasPerm);
+    chrome.permissions.contains({ origins: [originPattern] }, (hasPerm) => {
 
-        await chrome.storage.local.set({
+        chrome.storage.local.set({
             laststatus: {
                 type: "URL_PERMISSION_STATUS",
                 url,
@@ -61,104 +90,19 @@ async function checkUrlAndPermission(url, tabId) {
         });
 
         if (hasPerm && isMedium) {
-            // Wait for content to be ready before extraction
-            const isContentReady = await waitForContentToLoad(tabId);
-            if (isContentReady) {
-                await getFollower(tabId);
-            } else {
-                console.log("Content not ready, skipping extraction");
-            }
+            getFollower(tabId);
+        } else {
+            console.log("either it is not a medium web page or we donot have the permissions");
         }
+
     });
 }
 
-/**
- * Waits for page content to be fully loaded and visible
- * @param {number} tabId - The tab ID to check
- * @param {number} timeout - Maximum time to wait (default 15 seconds)
- * @returns {Promise<boolean>} - True if content is ready, false if timeout
- */
-async function waitForContentToLoad(tabId, timeout = 15000) {
-    const startTime = Date.now();
-    const pollInterval = 500; // Check every 500ms
-
-    console.log(`Waiting for content to load on tab ${tabId}...`);
-
-    while (Date.now() - startTime < timeout) {
-        try {
-            const results = await chrome.scripting.executeScript({
-                target: { tabId },
-                func: () => {
-                    // 1. Check document ready state
-                    if (document.readyState !== 'complete') {
-                        return { ready: false, reason: 'document not complete' };
-                    }
-
-                    // 2. Check for common loading indicators (customize these for Medium)
-                    const loadingSelectors = [
-                        'svg[class*="spinner"]',
-                        'div[class*="loader"]',
-                        'div[class*="loading"]',
-                        'div[class*="skelton"]', // Common for placeholder content
-                        '[data-testid="loading"]',
-                        '.spinner',
-                        '.loader',
-                        '.loading'
-                    ];
-
-                    for (const selector of loadingSelectors) {
-                        const loadingElement = document.querySelector(selector);
-                        if (loadingElement && loadingElement.offsetParent !== null) {
-                            return { ready: false, reason: 'loading indicator visible' };
-                        }
-                    }
-
-                    // 3. Check if our target content is present AND visible
-                    const readTimeElements = document.querySelectorAll('span[data-testid="storyReadTime"]');
-                    if (readTimeElements.length > 0 && readTimeElements[0].offsetParent !== null) {
-                        return { ready: true, reason: 'content found and visible' };
-                    }
-
-                    // 4. Check if article container exists but is empty
-                    const articleContainer = document.querySelector('article');
-                    if (articleContainer && articleContainer.textContent.trim().length < 100) {
-                        return { ready: false, reason: 'article container empty' };
-                    }
-
-                    return { ready: false, reason: 'target content not yet present' };
-                }
-            });
-
-            const status = results[0].result;
-            if (status.ready) {
-                console.log("✅ Content is ready:", status.reason);
-                return true;
-            }
-
-            // Log progress every few attempts
-            if ((Date.now() - startTime) % 3000 < 500) {
-                console.log(`⏳ Still waiting: ${status.reason}...`);
-            }
-
-        } catch (error) {
-            console.error("❌ Error checking page readiness:", error);
-            return false;
-        }
-
-        // Wait before next poll
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-    }
-
-    console.log(`❌ Timeout after ${timeout}ms waiting for content to load`);
-    return false;
-}
-
 function extractArticleData() {
-    const follow = async (element) => {
+    const follow = (element) => {
         try {
             element.click();
             console.log("Clicked follow button");
-            await new Promise(resolve => setTimeout(resolve, 1000));
             return true;
         } catch (err) {
             console.error("Error clicking follow button:", err);
@@ -181,7 +125,6 @@ function extractArticleData() {
         var checks = 0;
 
         while (currentElement && currentElement.tagName !== "ARTICLE" && checks !== 4) {
-            console.log("checking element:", foundAuthorImage, foundAuthorName, foundFollowingBtn, foundPublishDate);
 
             if (foundAuthorName === null) {
                 const authorName = currentElement.querySelectorAll('a[data-testid="authorName"]') || null;
@@ -245,6 +188,7 @@ function extractArticleData() {
                 } else if (isFollowing && isFollowing.length > 0 && isFollowing[0].textContent.trim() === "Following") {
                     artical.Auther.isFollowing = true;
                 }
+
                 return { artical, result: true };
             }
 
@@ -258,10 +202,11 @@ function extractArticleData() {
         return { artical, result: false };
     };
 
-    const data = document.querySelectorAll('span[data-testid="storyReadTime"]');
-    var articals = [];
 
-    if (data.length === 0) return { title: document.title, count: data.length, items: [] };
+    const data = document.querySelectorAll('span[data-testid="storyReadTime"]') || null;
+    const articals = [];
+
+    if (data.length === 0) return { title: document.title, items: [] };
 
     data.forEach((element) => {
         const result = hasdata(element);
@@ -276,9 +221,67 @@ function extractArticleData() {
 
     return {
         title: document.title,
-        count: data.length,
         items: articals
     };
+}
+
+function FindFollowers() {
+
+    const data = document.querySelectorAll("a[rel='noopener follow']");
+
+    if (data.length === 0) return { Followers: 0, FollowersUrl: null };
+
+    for (const value of data) {
+
+        const follow = value.textContent.trim() || null;
+        if (follow === null || !follow.includes("followers") || value.href === null) continue;
+
+        return { Followers: follow, FollowersUrl: value.href };
+
+    }
+
+    return { Followers: 0, FollowersUrl: null };
+
+}
+
+
+async function BulkFollow() {
+
+    var no_of_Followers_Achived = 0;
+    var data = document.querySelectorAll("main ul button");
+
+    while (data.length <= 101) {
+
+        data = document.querySelectorAll("main ul button");
+
+    }
+
+    if (data.length === 0) return no_of_Followers_Achived;
+
+    for (const value of data) {
+
+        if (value.textContent.trim() === "Follow") {
+
+            value.click();
+            ++no_of_Followers_Achived;
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            const email_Notifications = document.querySelectorAll("div[tabindex='-1'] div div div ul li:nth-child(3) button");
+
+            if (email_Notifications.length === 0) return no_of_Followers_Achived;
+
+            for (const value2 of email_Notifications) {
+
+                if (value2.textContent.trim() === "Email notifications off") value2.click();
+
+            }
+
+        }
+
+    }
+
+    return no_of_Followers_Achived;
 }
 
 async function getFollower(tabId) {
@@ -288,24 +291,78 @@ async function getFollower(tabId) {
     }
 
     try {
-        const data = await chrome.scripting.executeScript({
-            target: { tabId },
-            func: extractArticleData
-        });
 
-        console.log("Extracted data:", data[0].result);
+        var reTry = 0;
 
-        if (data[0].result.items.length === 0) {
-            console.log("No articles found in extraction");
-            return;
+        while (reTry < 1) {
+            const script1 = await chrome.scripting.executeScript({
+                target: { tabId },
+                func: extractArticleData
+            });
+
+            if (script1[0].result.items?.length === 0) {
+
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                console.log("retring after 5000 milliseconds");
+                reTry++;
+
+                continue;
+
+            }
+
+            chrome.storage.local.set({
+                ArticalData: script1[0].result
+            });
+
+            console.log("Successfully saved article data to storage");
+
+            if (script1[0].result.items[0].Auther.isFollowing) {
+
+                await chrome.tabs.update(tabId, { url: script1[0].result.items[0].Auther.AutherUrl });
+
+            }
+
+            break;
         }
 
-        await chrome.storage.local.set({
-            ArticalData: data[0].result
-        });
-
-        console.log("Successfully saved article data to storage");
     } catch (error) {
         console.error("Error executing script:", error);
     }
+
+    try {
+
+        const script2 = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: FindFollowers
+        })
+
+        console.log(script2[0]);
+
+        if (script2[0].result?.Followers !== 0) {
+
+            chrome.storage.local.set({
+                AutherFollowers: script2[0].result
+            });
+
+            await chrome.tabs.update(tabId, { url: script2[0].result.FollowersUrl })
+
+        }
+
+    } catch (error) {
+        console.error("Error executing script2:", error);
+    }
+
+    try {
+
+        const script3 = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: BulkFollow
+        })
+
+        console.log(script3[0]);
+
+    } catch (err) {
+        console.error("error in script3:", err);
+    }
+
 }

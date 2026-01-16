@@ -77,7 +77,6 @@ export default function status() {
             height: "inherit"
         }}>
             <Box sx={{
-                display: 'flex',
                 width: '100%',
                 maxWidth: 800,
                 overflow: 'hidden',
