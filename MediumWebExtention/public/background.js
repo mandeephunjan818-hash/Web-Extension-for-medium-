@@ -1,3 +1,6 @@
+//problems
+//what if the url chnage and it is not the same as before .
+//what if the user relad the same page when the script is ingeted .
 
 const mediumRegex = /^https?:\/\/([a-z0-9-]+\.)*medium\.com\/.*/i;
 
@@ -42,19 +45,35 @@ function debounceAndLock(tabId, delay, asyncFn) {
 }
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-    debounceAndLock(tabId, 3000, async () => {
-        const tab = await chrome.tabs.get(tabId);
-        checkUrlAndPermission(tab.url, tabId);
-    });
+
+    chrome.storage.local.get("on-off_Controler", (result) => {
+
+        if (result?.indecator === true) {
+            debounceAndLock(tabId, 3000, async () => {
+                const tab = await chrome.tabs.get(tabId);
+                checkUrlAndPermission(tab.url, tabId);
+            });
+        } else {
+            console.log("the extention is stoped");
+        }
+
+    })
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.url || (changeInfo.status === "complete")) {
-        debounceAndLock(tabId, 3000, async () => {
-            const freshTab = await chrome.tabs.get(tabId);
-            checkUrlAndPermission(freshTab.url, tabId);
-        });
-    }
+
+    chrome.storage.local.get("on-off_Controler", (result) => {
+
+        if (result?.indecator === true && changeInfo.url || (changeInfo.status === "complete")) {
+            debounceAndLock(tabId, 3000, async () => {
+                const freshTab = await chrome.tabs.get(tabId);
+                checkUrlAndPermission(freshTab.url, tabId);
+            });
+        } else {
+            console.log("the extention is stoped");
+        }
+
+    })
 });
 
 function checkUrlAndPermission(url, tabId) {
@@ -245,14 +264,30 @@ function FindFollowers() {
 }
 
 
-async function BulkFollow() {
+async function BulkFollow(BulkFollowArgument) {
+
+    let upperLimit, lowerLimit;
+
+    if (BulkFollowArgument != null && BulkFollowArgument.upperLimit != undefined && BulkFollowArgument.lowerLimit != undefined) {
+
+        upperLimit = BulkFollowArgument.upperLimit;
+        lowerLimit = BulkFollowArgument.lowerLimit;
+
+    } else {
+
+        upperLimit = 125;
+        lowerLimit = 100;
+
+    }
 
     var no_of_Followers_Achived = 0;
     var data = new Set();
 
     console.log("script3 injected");
 
-    while (data.size <= 100) {
+    const limit = Math.floor((Math.random() * upperLimit - lowerLimit) + lowerLimit);
+
+    while (data.size <= limit) {
 
         const previous = document.querySelector("main").clientHeight;
 
@@ -275,7 +310,7 @@ async function BulkFollow() {
 
     }
 
-    if (data.size < 100) {
+    if (data.size < limit) {
 
         console.log("aborting becaue the data is less then 100 = ", data.size);
 
@@ -380,9 +415,21 @@ async function getFollower(tabId) {
 
     try {
 
+        let BulkFollowArgument = null;
+
+        chrome.storage.local.get("BulkFollowArgument", (result) => {
+
+            if (result) {
+                BulkFollowArgument.upperLimit = result.upperLimit;
+                BulkFollowArgument.lowerLimit = result.lowerLimit;
+            }
+
+        })
+
         const script3 = await chrome.scripting.executeScript({
             target: { tabId },
-            func: BulkFollow
+            func: BulkFollow,
+            args: [BulkFollowArgument]
         })
 
         console.log(script3[0]);
