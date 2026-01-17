@@ -247,28 +247,59 @@ function FindFollowers() {
 
 async function BulkFollow() {
 
-    const data = document.querySelectorAll("main ul button");
-
     var no_of_Followers_Achived = 0;
+    var data = new Set();
 
-    if (data.length === 0) return no_of_Followers_Achived;
+    console.log("script3 injected");
+
+    while (data.size <= 100) {
+
+        const previous = document.querySelector("main").clientHeight;
+
+        document.querySelectorAll("main ul button").forEach(value => data.add(value));
+
+        const time = Math.floor((Math.random() * 1000) + 1000);
+
+        [...data][data.size - 1].scrollIntoView({
+            behavior: "smooth"
+        })
+
+        await new Promise((resolve) => setTimeout(resolve, time));
+
+        const current = document.querySelector("main").clientHeight;
+
+        if (previous >= current) {
+            console.log("Scroll stoped because of intrept or we reach the end ");
+            break;
+        }
+
+    }
+
+    if (data.size < 100) {
+
+        console.log("aborting becaue the data is less then 100 = ", data.size);
+
+        return no_of_Followers_Achived;
+    }
 
     for (const value of data) {
 
         if (value.textContent.trim() === "Follow") {
-            
+
             value.click();
             ++no_of_Followers_Achived;
 
-            await new Promise(resolve => setTimeout(resolve,500));
+            const time = Math.floor((Math.random() * 2000) + 4000);
 
-            const email_Notifications = document.querySelectorAll("div[tabindex='-1'] div div div ul li:nth-child(3) button");
+            await new Promise(resolve => setTimeout(resolve, time));
 
-            if(email_Notifications.length === 0 ) return no_of_Followers_Achived;
+            const email_Notifications = document.querySelectorAll("div[tabindex='-1'] ul li:nth-child(3) button");
 
-            for(const value2 of email_Notifications){
+            if (email_Notifications.length === 0) return no_of_Followers_Achived;
 
-                if(value2.textContent.trim() === "Email notifications off") value2.click();
+            for (const value2 of email_Notifications) {
+
+                if (value2.textContent.trim() === "Email notifications off") value2.click();
 
             }
 
@@ -297,8 +328,8 @@ async function getFollower(tabId) {
 
             if (script1[0].result.items?.length === 0) {
 
-                await new Promise(resolve => setTimeout(resolve, 3000));
-                console.log("retring after 5000 milliseconds");
+                const time = Math.floor((Math.random() * 2000) + 3000);
+                await new Promise(resolve => setTimeout(resolve, time));
                 reTry++;
 
                 continue;
