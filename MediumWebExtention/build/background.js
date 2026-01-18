@@ -46,34 +46,21 @@ function debounceAndLock(tabId, delay, asyncFn) {
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
 
-    chrome.storage.local.get("on-off_Controler", (result) => {
+    debounceAndLock(tabId, 3000, async () => {
+        const tab = await chrome.tabs.get(tabId);
+        checkUrlAndPermission(tab.url, tabId);
+    });
 
-        if (result?.indecator === true) {
-            debounceAndLock(tabId, 3000, async () => {
-                const tab = await chrome.tabs.get(tabId);
-                checkUrlAndPermission(tab.url, tabId);
-            });
-        } else {
-            console.log("the extention is stoped");
-        }
-
-    })
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
-    chrome.storage.local.get("on-off_Controler", (result) => {
-
-        if (result?.indecator === true && changeInfo.url || (changeInfo.status === "complete")) {
-            debounceAndLock(tabId, 3000, async () => {
-                const freshTab = await chrome.tabs.get(tabId);
-                checkUrlAndPermission(freshTab.url, tabId);
-            });
-        } else {
-            console.log("the extention is stoped");
-        }
-
-    })
+    if (changeInfo.url || (changeInfo.status === "complete")) {
+        debounceAndLock(tabId, 3000, async () => {
+            const freshTab = await chrome.tabs.get(tabId);
+            checkUrlAndPermission(freshTab.url, tabId);
+        });
+    }
 });
 
 function checkUrlAndPermission(url, tabId) {
@@ -109,7 +96,17 @@ function checkUrlAndPermission(url, tabId) {
         });
 
         if (hasPerm && isMedium) {
-            getFollower(tabId);
+
+            chrome.storage.local.get("on_off_Controler", (result) => {
+
+                if (result?.indecator) {
+                    getFollower(tabId);
+                } else {
+                    console.log("the extent is for now on pause");
+                }
+
+            })
+
         } else {
             console.log("either it is not a medium web page or we donot have the permissions");
         }
@@ -345,50 +342,36 @@ async function BulkFollow(BulkFollowArgument) {
     return no_of_Followers_Achived;
 }
 
-async function getFollower(tabId) {
-    if (!tabId) {
-        console.log("no TabId");
-        return;
-    }
-
+async function script1() {
     try {
 
-        var reTry = 0;
+        const script1 = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: extractArticleData
+        });
 
-        while (reTry < 1) {
-            const script1 = await chrome.scripting.executeScript({
-                target: { tabId },
-                func: extractArticleData
-            });
+        if (script1.length === 0) return false;
 
-            if (script1[0].result.items?.length === 0) {
+        chrome.storage.local.set({
+            ArticalData: script1[0].result
+        });
 
-                const time = Math.floor((Math.random() * 2000) + 3000);
-                await new Promise(resolve => setTimeout(resolve, time));
-                reTry++;
+        console.log("Successfully saved article data to storage");
 
-                continue;
+        if (script1[0].result.items[0].Auther.isFollowing) {
 
-            }
+            await chrome.tabs.update(tabId, { url: script1[0].result.items[0].Auther.AutherUrl });
 
-            chrome.storage.local.set({
-                ArticalData: script1[0].result
-            });
-
-            console.log("Successfully saved article data to storage");
-
-            if (script1[0].result.items[0].Auther.isFollowing) {
-
-                await chrome.tabs.update(tabId, { url: script1[0].result.items[0].Auther.AutherUrl });
-
-            }
-
-            break;
         }
 
     } catch (error) {
         console.error("Error executing script:", error);
     }
+
+    return false;
+}
+
+async function script2() {
 
     try {
 
@@ -396,6 +379,8 @@ async function getFollower(tabId) {
             target: { tabId },
             func: FindFollowers
         })
+
+        if (script2.length === 0) return false;
 
         console.log(script2[0]);
 
@@ -413,6 +398,11 @@ async function getFollower(tabId) {
         console.error("Error executing script2:", error);
     }
 
+    return false;
+
+}
+
+async function script3() {
     try {
 
         let BulkFollowArgument = null;
@@ -432,10 +422,39 @@ async function getFollower(tabId) {
             args: [BulkFollowArgument]
         })
 
+        if (script3.length === 0) return false;
+
         console.log(script3[0]);
 
     } catch (err) {
         console.error("error in script3:", err);
+    }
+
+    return false;
+}
+
+async function getFollower(tabId) {
+    if (!tabId) {
+        console.log("no TabId");
+        return;
+    }
+
+    var reTry = 0;
+
+    while (reTry < 2) {
+
+        const script1Result = script1();
+        const script2Result = script2();
+        const script3Result = script3();
+
+        if (!script1Result && !script2Result && !script3Result) {
+
+            const time = Math.floor((Math.random() * 2000) + 3000);
+            await new Promise(resolve => setTimeout(resolve, time));
+            reTry++;
+
+        }
+
     }
 
 }
