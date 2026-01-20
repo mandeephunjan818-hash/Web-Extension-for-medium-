@@ -1,8 +1,8 @@
-import extractArticleData from "./Script1";
-import FindFollowers from "./Script2";
-import BulkFollow from "./Script3";
+import extractArticleData from "./Script1.js";
+import FindFollowers from "./Script2.js";
+import BulkFollow from "./Script3.js";
 
-async function script1(tabId) {
+export async function script1(tabId) {
     try {
 
         const script1 = await chrome.scripting.executeScript({
@@ -42,7 +42,7 @@ async function script1(tabId) {
     return false;
 }
 
-async function script2(tabId) {
+export async function script2(tabId) {
 
     try {
 
@@ -73,7 +73,7 @@ async function script2(tabId) {
 
 }
 
-async function script3(tabId) {
+export async function script3(tabId) {
     try {
 
         const Todays_Followers = (await chrome.storage.local.get("Todays_Followers")).Todays_Followers || null;
@@ -112,5 +112,3 @@ async function script3(tabId) {
 
     return false;
 }
-
-export default { script1, script2, script3 }

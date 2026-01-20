@@ -1,4 +1,4 @@
-import { script1, script2, script3 } from "./ScriptsHandler";
+import { script1, script2, script3 } from "../scripts/ScriptsHandler.js";
 
 const mediumRegex = /^https?:\/\/([a-z0-9-]+\.)*medium\.com\/.*/i;
 

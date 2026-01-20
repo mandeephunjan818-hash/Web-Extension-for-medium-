@@ -1,13 +1,18 @@
 //problems
 //what if the url chnage and it is not the same as before .
-//what if the user relad the same page when the script is ingeted .
+//what if the user relad the same page when the script is engacted .
 
-import dayTimer from "./components/time/Timer";
+import dayTimer from "./components/time/Timer.js";
+import checkUrlAndPermission from "./components/permissions/CheckPermissions.js";
 
 const processingTabs = new Set();
 const pendingTimeouts = new Map();
 
-dayTimer();
+try {
+    dayTimer();
+} catch (err) {
+    console.error("the error in the timer", err);
+}
 
 function debounceAndLock(tabId, delay, asyncFn) {
 
