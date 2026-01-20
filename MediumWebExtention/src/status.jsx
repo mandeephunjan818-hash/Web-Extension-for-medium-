@@ -9,24 +9,17 @@ import CheckCircle from '@mui/icons-material/CheckCircle';
 import Warning from '@mui/icons-material/Warning';
 import LinkIcon from '@mui/icons-material/Link';
 import { useTheme } from './theme/ThemeContext';
+import FormControl from '@mui/joy/FormControl';
+import FormLabel from '@mui/joy/FormLabel';
+import FormHelperText from '@mui/joy/FormHelperText';
+import Input from '@mui/joy/Input';
+import Button from '@mui/joy/Button';
 
 export default function status() {
     const [msg, setMsg] = React.useState(null);
 
     // Use the theme manager hook - ALL theme logic is here
     const themeManager = useTheme('primary', 'solid');
-
-    // Rest of your app logic remains the same...
-    // React.useEffect(() => {
-    //     const mockMsg = {
-    //         type: "URL_PERMISSION_STATUS",
-    //         url: "https://medium.com/@5tigerjelly/creating-a-chrome-extension-with-react-and-vite-boilerplate-provided-db3d14473bf6",
-    //         originPattern: "https://medium.com/*",
-    //         hasPerm: true,
-    //         isMedium: true
-    //     };
-    //     handler(mockMsg);
-    // }, []);
 
     React.useEffect(() => {
 
@@ -46,12 +39,69 @@ export default function status() {
 
     }, []);
 
-    const handler = (msg) => {
-        if (msg?.type === "URL_PERMISSION_STATUS") {
-            setMsg(msg);
-            console.log("Permission status:", msg);
+    const handler = async (msg) => {
+        try {
+            if (msg?.type === "URL_PERMISSION_STATUS") {
+
+                const [result, value] = await Promise.all([
+                    chrome.storage.local.get("BulkFollowArguments"),
+                    chrome.storage.local.get("on_off_Controler")
+                ])
+
+                if (result.BulkFollowArguments) {
+                    msg.upperLimit = result.BulkFollowArguments.upperLimit;
+                    msg.lowerLimit = result.BulkFollowArguments.lowerLimit;
+                } else {
+                    await chrome.storage.local.set({
+                        BulkFollowArguments: { upperLimit: 125, lowerLimit: 100 }
+                    });
+                    msg.upperLimit = 125;
+                    msg.lowerLimit = 100;
+                }
+
+                if (!value.on_off_Controler) {
+                    await chrome.storage.local.set({
+                        on_off_Controler: { indector: "stop" }
+                    });
+                    msg.indector = "stop";
+                } else {
+                    msg.indector = value.on_off_Controler.indector;
+                }
+
+                msg.status = "set";
+                setMsg(msg);
+                console.log("Permission status:", msg);
+            }
+        } catch (error) {
+            console.error("Error in handler:", error);
         }
     };
+
+    const manageLimits = async () => {
+
+        const reloadPage = () => {
+            window.location.reload();
+        }
+
+        try {
+
+            msg.indector = msg.indector === "stop" ? "start" : "stop";
+
+            await chrome.storage.local.set({ BulkFollowArguments: { upperLimit: msg.upperLimit, lowerLimit: msg.lowerLimit } });
+            await chrome.storage.local.set({ on_off_Controler: { indector: msg.indector } })
+
+            await chrome.scripting.executeScript({
+                target: { tabId: msg.tabId },
+                func: reloadPage
+            })
+
+            window.location.reload();
+
+        } catch (err) {
+            console.error("error seting th elimits", err);
+        }
+
+    }
 
     if (!msg) {
         return (
@@ -158,6 +208,8 @@ export default function status() {
                                 <Typography
                                     level="body2"
                                     sx={{
+                                        overflowY: "hidden",
+                                        height: "1.3rem",
                                         wordBreak: 'break-all',
                                         fontFamily: 'monospace',
                                         p: 1,
@@ -165,10 +217,76 @@ export default function status() {
                                         bgcolor: themeManager.isSolid ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
                                         ...themeManager.getTextColor()
                                     }}
+                                    title={msg.url}
                                 >
                                     {msg.url}
                                 </Typography>
                             </Box>
+
+                            <FormControl sx={{ mt: "auto" }} >
+                                <FormLabel invertedColors sx={{ ...themeManager.getTextColor(), fontSize: ".6rem" }}>
+                                    Lower Limit - Upper Limit
+                                </FormLabel>
+                                <Input
+                                    startDecorator={
+                                        <Input
+                                            sx={{ opacity: 0.8, ...themeManager.getTextColor(), fontSize: ".7rem", px: 1, width: "120px" }}
+                                            type="number"
+                                            required
+                                            placeholder='Lower Limit'
+                                            value={msg.lowerLimit}
+                                            invertedColors
+                                            name='Lower Limit'
+                                            onChange={(event) =>
+                                                (Number(event.target.value) >= 10 && Number(event.target.value) < msg.upperLimit) && (
+                                                    setMsg(prevState => ({
+                                                        ...prevState,
+                                                        lowerLimit: Number(event.target.value)
+                                                    }))
+                                                )
+                                            }
+                                            error={msg.status === "error"}
+                                        />
+                                    }
+                                    sx={{ '--Input-decoratorChildHeight': 'inherit', opacity: 0.8, ...themeManager.getTextColor(), fontSize: ".7rem", p: "0%", width: "280px", overflow: "hidden" }}
+                                    type="number"
+                                    placeholder='Upper Limit'
+                                    required
+                                    invertedColors
+                                    value={msg.upperLimit}
+                                    name='Upper Limit'
+                                    onChange={(event) =>
+                                        (Number(event.target.value) > msg.lowerLimit && Number(event.target.value) <= 150) && (
+                                            setMsg(prevState => ({
+                                                ...prevState,
+                                                upperLimit: Number(event.target.value)
+                                            }))
+                                        )
+                                    }
+                                    error={msg.status === "error"}
+                                    endDecorator={
+                                        <Button
+                                            variant="solid"
+                                            color="primary"
+                                            loading={msg.status != "set"}
+                                            invertedColors
+                                            onClick={() => manageLimits()}
+                                            sx={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+                                        >
+                                            Done
+                                        </Button>
+                                    }
+                                />
+                                {msg.status === 'error' && (
+                                    <FormHelperText
+                                        color="danger"
+                                        invertedColors
+                                    >
+                                        Oops! something went wrong, please try again later.
+                                    </FormHelperText>
+                                )}
+                            </FormControl>
+
                         </Stack>
                     ) : (
                         <Stack spacing={2}>
@@ -217,6 +335,11 @@ export default function status() {
                     </Typography>
                 </Alert>
 
+                <Box sx={{ my: "auto", display: "flex", justifyContent: "center" }}>
+                    <Button sx={{ px: 3 }} onClick={() => manageLimits()} >
+                        {msg.indector === "stop" ? "start" : "stop"}
+                    </Button>
+                </Box>
 
             </Box>
         </Box>

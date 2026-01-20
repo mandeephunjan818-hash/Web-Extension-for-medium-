@@ -7,6 +7,41 @@ const mediumRegex = /^https?:\/\/([a-z0-9-]+\.)*medium\.com\/.*/i;
 const processingTabs = new Set();
 const pendingTimeouts = new Map();
 
+function isMoreThan24HoursApart(date1, date2) {
+    const diffMs = Math.abs(date2 - date1);
+    const diffHours = diffMs / (1000 * 60 * 60);
+
+    return diffHours >= 24;
+}
+
+const dayTimer = async () => {
+    const i = 0;
+    while (i === 0) {
+
+        var date = await chrome.storage.local.get("Todays_Followers").Todays_Followers?.date_time || new Date;
+
+        chrome.storage.local.set({
+            Todays_Followers: {
+                count: 0,
+                date_time: date
+            }
+        })
+
+        const j = 0;
+
+        while (j === 0) {
+            await new Promise((resolve) => setTimeout(resolve, (60 * 1000) * 15))
+
+            if (isMoreThan24HoursApart(date, new Date)) {
+                break;
+            }
+        }
+
+    }
+}
+
+dayTimer();
+
 function debounceAndLock(tabId, delay, asyncFn) {
 
     const existingTimeout = pendingTimeouts.get(tabId);
@@ -83,7 +118,7 @@ function checkUrlAndPermission(url, tabId) {
         return;
     }
 
-    chrome.permissions.contains({ origins: [originPattern] }, (hasPerm) => {
+    chrome.permissions.contains({ origins: [originPattern] }, async (hasPerm) => {
 
         chrome.storage.local.set({
             laststatus: {
@@ -91,21 +126,21 @@ function checkUrlAndPermission(url, tabId) {
                 url,
                 originPattern,
                 hasPerm,
-                isMedium
+                isMedium,
+                tabId: tabId
             }
         });
 
         if (hasPerm && isMedium) {
 
-            chrome.storage.local.get("on_off_Controler", (result) => {
+            const controler = await chrome.storage.local.get("on_off_Controler");
+            const Todays_Followers = await chrome.storage.local.get("Todays_Followers").Todays_Followers?.count || 0;
 
-                if (result?.indecator) {
-                    getFollower(tabId);
-                } else {
-                    console.log("the extent is for now on pause");
-                }
-
-            })
+            if (controler.on_off_Controler?.indector === "start" && Todays_Followers < 150) {
+                getFollower(tabId);
+            } else {
+                console.log("the extent is for now on pause");
+            }
 
         } else {
             console.log("either it is not a medium web page or we donot have the permissions");
@@ -265,10 +300,10 @@ async function BulkFollow(BulkFollowArgument) {
 
     let upperLimit, lowerLimit;
 
-    if (BulkFollowArgument != null && BulkFollowArgument.upperLimit != undefined && BulkFollowArgument.lowerLimit != undefined) {
+    if (BulkFollowArgument.upperLimit && BulkFollowArgument.lowerLimit) {
 
-        upperLimit = BulkFollowArgument.upperLimit;
-        lowerLimit = BulkFollowArgument.lowerLimit;
+        upperLimit = Number(BulkFollowArgument.upperLimit);
+        lowerLimit = Number(BulkFollowArgument.lowerLimit);
 
     } else {
 
@@ -282,7 +317,8 @@ async function BulkFollow(BulkFollowArgument) {
 
     console.log("script3 injected");
 
-    const limit = Math.floor((Math.random() * upperLimit - lowerLimit) + lowerLimit);
+    const limit = Math.floor((Math.random() * (upperLimit - lowerLimit) + lowerLimit) - BulkFollowArgument.Todays_Followers);
+    console.log(limit);
 
     while (data.size <= limit) {
 
@@ -311,7 +347,7 @@ async function BulkFollow(BulkFollowArgument) {
 
         console.log("aborting becaue the data is less then 100 = ", data.size);
 
-        return no_of_Followers_Achived;
+        return { no_of_Followers_Achived, limit };
     }
 
     for (const value of data) {
@@ -342,7 +378,7 @@ async function BulkFollow(BulkFollowArgument) {
     return no_of_Followers_Achived;
 }
 
-async function script1() {
+async function script1(tabId) {
     try {
 
         const script1 = await chrome.scripting.executeScript({
@@ -350,17 +386,28 @@ async function script1() {
             func: extractArticleData
         });
 
-        if (script1.length === 0) return false;
+        if (script1[0].result?.items.length === 0) return false;
 
         chrome.storage.local.set({
             ArticalData: script1[0].result
         });
 
+        const Todays_Followers = await chrome.storage.local.get("Todays_Followers").Todays_Followers || null;
+
+        chrome.storage.local.set({
+            Todays_Followers: {
+                count: Todays_Followers?.count + script1[0].result?.items.length || 0,
+                date_time: Todays_Followers?.date_time || new Date()
+            }
+        })
+
         console.log("Successfully saved article data to storage");
 
         if (script1[0].result.items[0].Auther.isFollowing) {
 
-            await chrome.tabs.update(tabId, { url: script1[0].result.items[0].Auther.AutherUrl });
+            chrome.tabs.update(tabId, { url: script1[0].result.items[0].Auther.AutherUrl });
+
+            return true;
 
         }
 
@@ -371,7 +418,7 @@ async function script1() {
     return false;
 }
 
-async function script2() {
+async function script2(tabId) {
 
     try {
 
@@ -379,8 +426,6 @@ async function script2() {
             target: { tabId },
             func: FindFollowers
         })
-
-        if (script2.length === 0) return false;
 
         console.log(script2[0]);
 
@@ -390,7 +435,9 @@ async function script2() {
                 AutherFollowers: script2[0].result
             });
 
-            await chrome.tabs.update(tabId, { url: script2[0].result.FollowersUrl })
+            chrome.tabs.update(tabId, { url: script2[0].result.FollowersUrl })
+
+            return true;
 
         }
 
@@ -402,19 +449,19 @@ async function script2() {
 
 }
 
-async function script3() {
+async function script3(tabId) {
     try {
 
-        let BulkFollowArgument = null;
+        const Todays_Followers = await chrome.storage.local.get("Todays_Followers").Todays_Followers || null;
 
-        chrome.storage.local.get("BulkFollowArgument", (result) => {
+        const BulkFollowArgument = { Todays_Followers: Todays_Followers?.count || 0 };
 
-            if (result) {
-                BulkFollowArgument.upperLimit = result.upperLimit;
-                BulkFollowArgument.lowerLimit = result.lowerLimit;
-            }
+        const result = await chrome.storage.local.get("BulkFollowArguments");
 
-        })
+        if (result.BulkFollowArguments) {
+            BulkFollowArgument.upperLimit = result.BulkFollowArguments.upperLimit;
+            BulkFollowArgument.lowerLimit = result.BulkFollowArguments.lowerLimit;
+        }
 
         const script3 = await chrome.scripting.executeScript({
             target: { tabId },
@@ -422,9 +469,18 @@ async function script3() {
             args: [BulkFollowArgument]
         })
 
-        if (script3.length === 0) return false;
+        chrome.storage.local.set({
+            Todays_Followers: {
+                count: Todays_Followers?.count + script3[0].result?.no_of_Followers_Achived,
+                date_time: Todays_Followers?.date_time
+            }
+        })
+
+        if (script3[0].result?.no_of_Followers_Achived < script3[0].result?.limit) return false;
 
         console.log(script3[0]);
+
+        return true;
 
     } catch (err) {
         console.error("error in script3:", err);
@@ -443,13 +499,16 @@ async function getFollower(tabId) {
 
     while (reTry < 2) {
 
-        const script1Result = script1();
-        const script2Result = script2();
-        const script3Result = script3();
+        const script1Result = await script1(tabId);
+        if (script1Result === true) break;
+        const script2Result = await script2(tabId);
+        if (script2Result === true) break;
+        const script3Result = await script3(tabId);
+        if (script3Result === true) break;
 
         if (!script1Result && !script2Result && !script3Result) {
 
-            const time = Math.floor((Math.random() * 2000) + 3000);
+            const time = Math.floor((Math.random() * 2000) + 1000);
             await new Promise(resolve => setTimeout(resolve, time));
             reTry++;
 
