@@ -100,11 +100,9 @@ export async function script3(tabId) {
             }
         })
 
-        if ((script3[0].result?.no_of_Followers_Achived ?? 0) < (script3[0].result?.limit ?? 125)) return false;
-
         console.log(script3[0]);
 
-        return true;
+        return script3[0].result?.result;
 
     } catch (err) {
         console.error("error in script3:", err);

@@ -1,71 +1,79 @@
-//problems
-//what if the url chnage and it is not the same as before .
-//what if the user relad the same page when the script is engacted .
-
 import dayTimer from "./components/time/Timer.js";
 import checkUrlAndPermission from "./components/permissions/CheckPermissions.js";
 
-const processingTabs = new Set();
 const pendingTimeouts = new Map();
 
-try {
-    dayTimer();
-} catch (err) {
-    console.error("the error in the timer", err);
-}
+// ONE global lock per profile
+let currentProcessingTabId = null;
 
-function debounceAndLock(tabId, delay, asyncFn) {
+try { dayTimer(); } catch (err) { console.error("timer error", err); }
 
-    const existingTimeout = pendingTimeouts.get(tabId);
-    if (existingTimeout) {
-        clearTimeout(existingTimeout);
+function debounce(tabId, delay, fn) {
+    const existing = pendingTimeouts.get(tabId);
+    if (existing) {
+        clearTimeout(existing);
         pendingTimeouts.delete(tabId);
-        console.log(`🔄 Debounced previous timer for tab ${tabId}`);
     }
 
-
-    const timeoutId = setTimeout(async () => {
+    const t = setTimeout(async () => {
         pendingTimeouts.delete(tabId);
-
-
-        if (processingTabs.has(tabId)) {
-            console.log(`⏭️ Tab ${tabId} is already processing, skipping duplicate`);
-            return;
-        }
-
-
-        processingTabs.add(tabId);
-        console.log(`🔒 Acquired lock for tab ${tabId}`);
-
         try {
-            await asyncFn();
-        } catch (error) {
-            console.error(`❌ Error processing tab ${tabId}:`, error);
-        } finally {
-
-            processingTabs.delete(tabId);
-            console.log(`🔓 Released lock for tab ${tabId}`);
+            await fn();
+        } catch (e) {
+            console.error("debounced fn error", e);
         }
     }, delay);
 
-    pendingTimeouts.set(tabId, timeoutId);
+    pendingTimeouts.set(tabId, t);
 }
 
-chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+// cleanup when tab closes
+chrome.tabs.onRemoved.addListener((tabId) => {
+    const t = pendingTimeouts.get(tabId);
+    if (t) {
+        clearTimeout(t);
+        pendingTimeouts.delete(tabId);
+    }
 
-    debounceAndLock(tabId, 3000, async () => {
+    if (currentProcessingTabId === tabId) {
+        currentProcessingTabId = null;
+        console.log(`🧹 Cleared global lock (tab ${tabId} closed)`);
+    }
+});
+
+async function runSingle(tabId, url) {
+    // if someone else is running, skip
+    if (currentProcessingTabId !== null && currentProcessingTabId !== tabId) {
+        console.log(`⛔ Skipping tab ${tabId}. Tab ${currentProcessingTabId} is already running.`);
+        return;
+    }
+
+    // acquire lock if free
+    if (currentProcessingTabId === null) {
+        currentProcessingTabId = tabId;
+        console.log(`🔒 Global lock acquired by tab ${tabId}`);
+    }
+
+    try {
+        await checkUrlAndPermission(url, tabId);
+    } finally {
+        currentProcessingTabId = null;
+        console.log(`🔓 Global lock released by tab ${tabId}`);
+    }
+}
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+    debounce(tabId, 3000, async () => {
         const tab = await chrome.tabs.get(tabId);
-        checkUrlAndPermission(tab.url, tabId);
+        await runSingle(tabId, tab.url);
     });
-
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-
-    if (changeInfo.url || (changeInfo.status === "complete")) {
-        debounceAndLock(tabId, 3000, async () => {
-            const freshTab = await chrome.tabs.get(tabId);
-            checkUrlAndPermission(freshTab.url, tabId);
+    if (changeInfo.url || changeInfo.status === "complete") {
+        debounce(tabId, 3000, async () => {
+            const tab = await chrome.tabs.get(tabId);
+            await runSingle(tabId, tab.url);
         });
     }
 });
